@@ -1,0 +1,31 @@
+{
+    "experiment": "Bilayer Build",
+    "date": "2025-11-14T15:30:37.297293",
+    "parameters": {
+        "lipid_names": [
+            "MC3",
+            "DSPC",
+            "CHOL",
+            "PEG2000_C_DMG"
+        ],
+        "lipid_counts": [
+            31,
+            33,
+            6,
+            6,
+            25,
+            25,
+            2,
+            0
+        ],
+        "solvent_name": "tip3p",
+        "solvent_count": 3840,
+        "box_dimensions": [
+            56.0,
+            56.0,
+            211.93049162871117
+        ],
+        "input_name": "packmol_input.inp",
+        "output_name": "packmol_output.pdb"
+    }
+}

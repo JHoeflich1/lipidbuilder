@@ -1,0 +1,90 @@
+tolerance 2.0
+filetype pdb
+output packmol_output.pdb
+
+structure MC3.pdb
+  number 31
+  inside box 0. 0. 0. 56.00 56.00 30.99
+  atoms 36
+    below plane 0. 0. 1. 5.39
+  end atoms
+  atoms 43
+    over plane 0. 0. 1. 21.56
+  end atoms
+end structure
+
+structure MC3.pdb
+  number 33
+  inside box 0. 0. -30.99 56.00 56.00 0.
+  atoms 36
+    over plane 0. 0. 1. -5.39
+  end atoms
+  atoms 43
+    below plane 0. 0. 1. -21.56
+  end atoms
+end structure
+
+structure DSPC.pdb
+  number 6
+  inside box 0. 0. 0. 56.00 56.00 36.38
+  atoms 54
+    below plane 0. 0. 1. 6.33
+  end atoms
+  atoms 31
+    over plane 0. 0. 1. 25.31
+  end atoms
+end structure
+
+structure DSPC.pdb
+  number 6
+  inside box 0. 0. -36.38 56.00 56.00 0.
+  atoms 54
+    over plane 0. 0. 1. -6.33
+  end atoms
+  atoms 31
+    below plane 0. 0. 1. -25.31
+  end atoms
+end structure
+
+structure CHOL.pdb
+  number 25
+  inside box 0. 0. 0. 56.00 56.00 19.76
+  atoms 7
+    below plane 0. 0. 1. 3.44
+  end atoms
+  atoms 31
+    over plane 0. 0. 1. 13.75
+  end atoms
+end structure
+
+structure CHOL.pdb
+  number 25
+  inside box 0. 0. -19.76 56.00 56.00 0.
+  atoms 7
+    over plane 0. 0. 1. -3.44
+  end atoms
+  atoms 31
+    below plane 0. 0. 1. -13.75
+  end atoms
+end structure
+
+structure PEG2000_C_DMG.pdb
+  number 2
+  inside box 0. 0. 0. 56.00 56.00 47.33
+  atoms 52
+    below plane 0. 0. 1. 8.23
+  end atoms
+  atoms 36
+    over plane 0. 0. 1. 32.93
+  end atoms
+end structure
+
+structure tip3p.pdb
+  number 1920
+  inside box 0. 0. 47.33 56.00 56.00 111.44
+end structure
+
+structure tip3p.pdb
+  number 1920
+  inside box 0. 0. -100.49 56.00 56.00 -36.38
+end structure

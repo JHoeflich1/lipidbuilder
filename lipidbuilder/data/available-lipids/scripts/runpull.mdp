@@ -1,0 +1,41 @@
+integrator = md
+dt = 0.002
+nsteps = 25000 ; 50 ps
+
+continuation = no
+constraints = h-bonds
+constraint-algorithm = lincs
+
+cutoff-scheme = Verlet
+nstxout = 0
+nstvout = 0
+nstfout = 0
+nstxout-compressed = 250 ; 0.5 ps
+
+nstlist = 40
+vdwtype = PME
+coulombtype = PME
+
+Tcoupl = v-rescale
+tc_grps = system
+tau-t = 0.1
+ref-t = 300.0
+
+gen-vel = yes
+gen-temp = 300.0
+pbc = xyz
+DispCorr = EnerPres
+
+; Pull code
+pull                    = yes
+pull-ncoords            = 1        
+pull-ngroups            = 1         
+pull-group1-name        = pull_atom  
+pull-coord1-type        = constant-force
+pull-coord1-geometry    = direction-periodic
+pull-coord1-vec         = 0 0 1
+pull-coord1-dim         = N N Y
+pull-coord1-groups      = 0 1
+pull-coord1-start       = yes       ; define initial COM distance > 0
+pull-coord1-rate        = 0.01      ; 0.01 nm per ps = 10 nm per ns
+pull-coord1-k           = 1000      ; kJ mol^-1 nm^-2

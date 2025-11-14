@@ -1,0 +1,8 @@
+#
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+#scratchfiles
+lipidbuilder/data/available-lipids/scripts/scratch/*
