@@ -71,10 +71,6 @@ def build_packmol_input(
     input_name: str = "packmol_input.inp",
     ) -> Tuple[str, List[float]]:
 
-
-    # Create Lipid objects (pass explicit full path to CSV if needed)
-    lipid_library_csv = DATA_DIR / "available-lipids/PulledLipid.csv"
-
     lipids = [Lipid(name) for name in lipid_names]
 
     cwd = Path.cwd()
@@ -93,7 +89,7 @@ def build_packmol_input(
 
 
     # Determine box size
-    spacing_factor = 7  # spacing factor, can be changed 
+    spacing_factor = 10  # spacing factor, can be changed 
     total_count = sum(lipid_counts)/2 # add up total number of lipids and divide by 2 to get per leaflet
     xy = np.sqrt(total_count) * spacing_factor # calculate x and y dimention assuming grid packing
 
@@ -127,10 +123,10 @@ def build_packmol_input(
                         f"  number {count}",
                         f"  inside box 0. 0. 0. {xy:.2f} {xy:.2f} {lipid.head_to_tail_distance * 1.15:.2f}",
                         f"  atoms {lipid.tailgroup_atom_index}",
-                        f"    below plane 0. 0. 1. {lipid.head_to_tail_distance * 0.2:.2f}",
+                        f"    below plane 0. 0. 1. {lipid.head_to_tail_distance * 0.15:.2f}",
                         f"  end atoms",
                         f"  atoms {lipid.headgroup_atom_index}",
-                        f"    over plane 0. 0. 1. {lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.2:.2f}",
+                        f"    over plane 0. 0. 1. {lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.15:.2f}",
                         f"  end atoms",
                         "end structure",
                         ""
@@ -142,22 +138,22 @@ def build_packmol_input(
                         f"  number {count}",
                         f"  inside box 0. 0. -{lipid.head_to_tail_distance * 1.15:.2f} {xy:.2f} {xy:.2f} 0.",
                         f"  atoms {lipid.tailgroup_atom_index}",
-                        f"    over plane 0. 0. 1. -{lipid.head_to_tail_distance * 0.2:.2f}",
+                        f"    over plane 0. 0. 1. -{lipid.head_to_tail_distance * 0.15:.2f}",
                         f"  end atoms",
                         f"  atoms {lipid.headgroup_atom_index}",
-                        f"    below plane 0. 0. 1. -{lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.2:.2f}",
+                        f"    below plane 0. 0. 1. -{lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.15:.2f}",
                         f"  end atoms",
                         "end structure",
                         ""
                     ])
 
-    max_z_top = max(lipid.head_to_tail_distance * 1.15 for i, lipid in enumerate(lipids) if lipid_counts[2*i] > 0)
-    max_z_bottom = max(lipid.head_to_tail_distance * 1.15 for i, lipid in enumerate(lipids) if lipid_counts[2*i+1] > 0)
+    max_z_top = max(lipid.head_to_tail_distance * 1.05 for i, lipid in enumerate(lipids) if lipid_counts[2*i] > 0)
+    max_z_bottom = max(lipid.head_to_tail_distance * 1.05 for i, lipid in enumerate(lipids) if lipid_counts[2*i+1] > 0)
     
     if solvent_name:
         density_water = 1e-21 / 18.01  # mol/nm^3  experimental density of water
         water_per_layer = solvent_count / 2
-        fudge_factor_packing = 3.5
+        fudge_factor_packing = 2
         #estimate volume needed to contain a number of water molecuels per layer
         volume_per_layer = water_per_layer / (density_water * 6.02e23) * fudge_factor_packing * 1000 # 3.5 is a fudge factor to give packmol room for packing
         solvent_layer_thickness = volume_per_layer / (xy ** 2)  # adaptive thickness based on number of waters
@@ -167,7 +163,7 @@ def build_packmol_input(
         lines.extend([
             f"structure {solvent_name}.pdb",
             f"  number {int(solvent_count / 2)}",
-            f"  inside box 0. 0. {z_start_top:.2f} {xy:.2f} {xy:.2f} {z_start_top + solvent_layer_thickness:.2f}",
+            f"  inside box 0. 0. {z_start_top * 0.8 :.2f} {xy:.2f} {xy:.2f} {z_start_top * 0.8 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
         ])
@@ -176,7 +172,7 @@ def build_packmol_input(
         lines.extend([
             f"structure {solvent_name}.pdb",
             f"  number {int(solvent_count / 2)}",
-            f"  inside box 0. 0. {z_start_bottom:.2f} {xy:.2f} {xy:.2f} {z_start_bottom + solvent_layer_thickness:.2f}",
+            f"  inside box 0. 0. {z_start_bottom * 0.8 :.2f} {xy:.2f} {xy:.2f} {z_start_bottom* 0.8 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
         ])
@@ -190,7 +186,7 @@ def build_packmol_input(
 
     z = max_z_top + max_z_bottom + 2 * solvent_layer_thickness
     box_dims = [xy, xy, z]
-    
+
     # Save config
     config = init_config_file()
     config["parameters"] = {
@@ -256,11 +252,11 @@ def run_packmol(
     lipid_molecules = []
     for name in lipid_names:
         try:
-            smiles = lipid_library[lipid_library["Name"] == name]["Lipid Smiles String"].values[0]
+            smiles = lipid_library[lipid_library["Name"] == name]["Smiles String"].values[0]
         except IndexError:
             raise ValueError(f"Lipid '{name}' not found in lipid library: {lipid_library_path}")
         
-        molecule = Molecule.from_smiles(smiles)
+        molecule = Molecule.from_smiles(smiles, allow_undefined_stereo=True)
         if charge_model.endswith(".pt"):
             # Assume a NAGL model
             molecule.assign_partial_charges(
