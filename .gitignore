@@ -4,5 +4,8 @@ eggs/
 *.egg-info/
 *.egg
 
+__pycache__/
+.ipynb_checkpoints
+
 #scratchfiles
 lipidbuilder/data/available-lipids/scripts/scratch/*
