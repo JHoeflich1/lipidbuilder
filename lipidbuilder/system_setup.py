@@ -283,7 +283,11 @@ def run_packmol(
         all_lipids.extend([lipid]*top_count)
         all_lipids.extend([lipid]*bottom_count)
 
+    solvent_name = config['parameters']['solvent_name']
     solvent_mol = Molecule.from_file(f"{solvent_name}.pdb")
+    for atom in solvent_mol.atoms:
+        atom.metadata["residue_name"] = solvent_name.upper()
+
     all_molecules = all_lipids + [solvent_mol] * solvent_count
 
     topology = Topology.from_molecules(all_molecules)
