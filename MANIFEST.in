@@ -1,0 +1,5 @@
+include README.md
+recursive-include lipidbuilder/data/available-lipids *.csv *.pdb README
+recursive-include lipidbuilder/data/forcefields *.offxml README
+prune lipidbuilder/results
+prune lipidbuilder/tests

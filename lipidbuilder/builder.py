@@ -4,6 +4,7 @@ import os
 import time
 
 from .system_setup import build_packmol_input, run_packmol
+from .utils import DEFAULT_RESULTS_DIR
 
 class LipidSystemBuilder:
     """
@@ -13,11 +14,11 @@ class LipidSystemBuilder:
 
     def __init__(
         self,
-        result_directory: str,
-        force_field_name: str,
-        water_model_name: str,
-        force_field_file: str,
-        charge_model: str,
+        result_directory: str | Path = DEFAULT_RESULTS_DIR,
+        force_field_name: str = "openff-2.2.0",
+        water_model_name: str = "tip3p",
+        force_field_file: str | Path = "openff-2.2.0.offxml",
+        charge_model: str = "am1bcc",
         simulation_platform: str = "openmm",
         water_model_file: Optional[str] = None,
         gmx_executable: Optional[str] = None,
@@ -26,7 +27,8 @@ class LipidSystemBuilder:
         hydration_level: int = 0, 
         ion: Optional[str] = None,
         ion_concentration: Optional[float] = None,
-        use_hmr: bool = False 
+        use_hmr: bool = False,
+        hmr: Optional[bool] = None,
     ):
         """
         Initialize a lipid bilayer system builder.
@@ -39,8 +41,8 @@ class LipidSystemBuilder:
             Identifier for the force field used.
         water_model_name : str
             Identifier for the water model.
-        force_field_file : str
-            Path to the force field XML or GMX file.
+        force_field_file : str or Path
+            Force-field file name in lipidbuilder/data/forcefields or an absolute path.
         charge_model : str
             Charge model used (e.g., "AM1", "Gasteiger", etc.).
         simulation_platform : str, optional
@@ -87,7 +89,7 @@ class LipidSystemBuilder:
 
         self.force_field = force_field_name
         self.water_model = water_model_name
-        self.force_field_file = force_field_file
+        self.force_field_file = str(force_field_file)
         self.water_model_file = water_model_file
         self.charge_model = charge_model
         self.simulation_platform = simulation_platform
@@ -95,11 +97,13 @@ class LipidSystemBuilder:
         self.hydration_level = hydration_level
         self.ion = ion
         self.ionic_concentration = ion_concentration
-        self.use_hmr = use_hmr
+        self.use_hmr = use_hmr if hmr is None else hmr
 
         # Define system naming and paths
+        clean_charge_model = charge_model.removesuffix(".pt")
         lipid_str = "_".join(self.lipid_types)
-        self.system_name = f"{lipid_str}-{force_field_name}-{charge_model}"
+        hmr_suffix = "-HMR" if self.use_hmr else ""
+        self.system_name = f"{lipid_str}-{force_field_name}-{clean_charge_model}{hmr_suffix}"
         self.base_path = Path(result_directory) / self.system_name
         
         self.setup_dir = self.base_path / "setup"
@@ -115,34 +119,35 @@ class LipidSystemBuilder:
         original_dir = Path.cwd()
         os.chdir(self.setup_dir)
 
-        # Build Packmol input
-        packmol_input_file, box_dims = build_packmol_input(
-            lipid_names=self.lipid_types,
-            lipid_counts=self.lipid_composition,
-            solvent_name=self.water_model,
-            solvent_count=self.hydration_level * sum(self.lipid_composition),
-            tolerance=2.0
-        )
+        try:
+            packmol_input_file, box_dims = build_packmol_input(
+                lipid_names=self.lipid_types,
+                lipid_counts=self.lipid_composition,
+                solvent_name=self.water_model,
+                solvent_count=self.hydration_level * sum(self.lipid_composition),
+                force_field_file=self.force_field_file,
+                charge_model=self.charge_model,
+                hmr=self.use_hmr,
+                tolerance=2.0,
+            )
 
-        self.packmol_input_file = packmol_input_file
-        self.box_dims = box_dims
+            self.packmol_input_file = packmol_input_file
+            self.box_dims = box_dims
 
-        start_time = time.time()
-        # Run Packmol and optionally parameterize
-        run_packmol(
-            packmol_input_file=packmol_input_file,
-            parameterize=True, # always parameterize system for now
-            force_field_file=self.force_field_file,
-            hmr=self.use_hmr,
-            charge_model = self.charge_model,
-            config_path="config.json",
-        )
+            start_time = time.time()
+            run_packmol(
+                packmol_input_file=packmol_input_file,
+                parameterize=True,
+                force_field_file=self.force_field_file,
+                hmr=self.use_hmr,
+                charge_model=self.charge_model,
+                config_path="config.json",
+            )
 
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"Coordinates created and parameterized. Completed in {elapsed_time:.2f} seconds.")
-        os.chdir(original_dir)
-        print("System setup is not yet implemented.")
+            elapsed_time = time.time() - start_time
+            print(f"Coordinates created and parameterized. Completed in {elapsed_time:.2f} seconds.")
+        finally:
+            os.chdir(original_dir)
 
     def __repr__(self):
         return (

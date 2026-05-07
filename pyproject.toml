@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lipidbuilder"
+version = "0.1.0"
+description = "Build and parameterize lipid bilayer systems with Packmol and OpenFF."
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+authors = [
+  { name = "Julianne Hoeflich" }
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[tool.setuptools.packages.find]
+include = ["lipidbuilder*"]
+exclude = ["lipidbuilder.results*", "lipidbuilder.tests*"]
+
+[tool.setuptools.package-data]
+lipidbuilder = [
+  "data/available-lipids/PulledLipid.csv",
+  "data/available-lipids/lipid_pdbs/*/*.pdb",
+  "data/available-lipids/solvent_pdbs/*.pdb",
+  "data/forcefields/*.offxml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["lipidbuilder/tests"]

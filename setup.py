@@ -1,18 +1,29 @@
-from setuptools import setup, find_packages
-import os
+from pathlib import Path
+
+from setuptools import find_packages, setup
+
+README = Path("README.md")
+
 setup(
     name="lipidbuilder",
     version="0.1.0",
     author="Julianne Hoeflich",
-    description="A toolkit for building and parameterizing lipid bilayers with openFF.",
-    long_description=open("README.md").read() if os.path.exists("README.md") else "",
+    description="Build and parameterize lipid bilayer systems with Packmol and OpenFF.",
+    long_description=README.read_text() if README.exists() else "",
     long_description_content_type="text/markdown",
-    url="https://github.com/JHoeflich1/lipidbuilder", 
-    packages=find_packages(),
+    packages=find_packages(exclude=["lipidbuilder.results*", "lipidbuilder.tests*"]),
     include_package_data=True,
+    package_data={
+        "lipidbuilder": [
+            "data/available-lipids/PulledLipid.csv",
+            "data/available-lipids/lipid_pdbs/*/*.pdb",
+            "data/available-lipids/solvent_pdbs/*.pdb",
+            "data/forcefields/*.offxml",
+        ],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.10,<3.12",
 )

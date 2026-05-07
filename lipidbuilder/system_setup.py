@@ -1,20 +1,10 @@
-from pathlib import Path
-from typing import List, Tuple
-
-import numpy as np
-from .lipid import Lipid
-import os
-import shutil
-import json
-from datetime import datetime
-
-import os
 import json
 import time
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import mdtraj
 import numpy as np
@@ -24,17 +14,21 @@ from openff.toolkit import Molecule, Topology, ForceField
 from openff.interchange import Interchange
 from openff.toolkit.utils.nagl_wrapper import NAGLToolkitWrapper
 from openff.units import unit
-
-
-from openff.units import unit
-from .utils import DATA_DIR
+from .lipid import Lipid
+from .utils import (
+    FORCEFIELD_DIR,
+    LIPID_LIBRARY_PATH,
+    LIPID_PDB_DIR,
+    SOLVENT_PDB_DIR,
+    resolve_force_field_path,
+)
 
 # functions for seting up packmol input file, running and minimizing 
 
 def copy_lipid_files(lipids: List[Lipid], source_dir: Path = None, dest_dir: Path = None):
     """Copy each lipid's .pdb and .top file to the working directory."""
     if source_dir is None:
-        source_dir = DATA_DIR / "available-lipids/lipids_pdbs"
+        source_dir = LIPID_PDB_DIR
     if dest_dir is None:
         dest_dir = Path.cwd()
 
@@ -67,6 +61,9 @@ def build_packmol_input(
     lipid_counts: List[int],
     solvent_name: str,
     solvent_count: int,
+    force_field_file: str,
+    charge_model: str,
+    hmr: bool,
     tolerance: float = 2.0,
     input_name: str = "packmol_input.inp",
     ) -> Tuple[str, List[float]]:
@@ -76,22 +73,26 @@ def build_packmol_input(
     cwd = Path.cwd()
 
     # Copy lipid files from absolute repo data dir into current working directory
-    copy_lipid_files(lipids, source_dir=DATA_DIR / "available-lipids/lipid_pdbs", dest_dir=cwd)
+    copy_lipid_files(lipids, source_dir=LIPID_PDB_DIR, dest_dir=cwd)
 
     # Copy solvent files from absolute repo data dir into cwd
     if solvent_name:
         for ext in [".pdb"]:
-            src = DATA_DIR / "available-lipids/solvent_pdbs" / f"{solvent_name}{ext}"
+            src = SOLVENT_PDB_DIR / f"{solvent_name}{ext}"
             dst = cwd / f"{solvent_name}{ext}"
             if not src.exists():
                 raise FileNotFoundError(f"Solvent file {src} does not exist.")
             shutil.copy(src, dst)
 
 
-    # Determine box size
-    spacing_factor = 10  # spacing factor, can be changed 
-    total_count = sum(lipid_counts)/2 # add up total number of lipids and divide by 2 to get per leaflet
-    xy = np.sqrt(total_count) * spacing_factor # calculate x and y dimention assuming grid packing
+
+    area_per_lipid = 10  # not sure how I came on this value, but it works
+    N_top = sum(lipid_counts[::2])
+    N_bottom = sum(lipid_counts[1::2])
+
+    # Take the max for xy (largest leaflet sets the box)
+    N_leaflet_max = max(N_top, N_bottom)
+    xy = np.sqrt(N_leaflet_max) * area_per_lipid # ideally this is sqrt(N * area) but cant figure out the right area per lipid to use, so just fudging with a constant for now.
 
 
     output_name = "packmol_output.pdb"
@@ -121,12 +122,12 @@ def build_packmol_input(
                     lines.extend([
                         f"structure {lipid.name}.pdb",
                         f"  number {count}",
-                        f"  inside box 0. 0. 0. {xy:.2f} {xy:.2f} {lipid.head_to_tail_distance * 1.15:.2f}",
+                        f"  inside box 0. 0. 0. {xy:.2f} {xy:.2f} {lipid.head_to_tail_distance * 1.1:.2f}",
                         f"  atoms {lipid.tailgroup_atom_index}",
-                        f"    below plane 0. 0. 1. {lipid.head_to_tail_distance * 0.15:.2f}",
+                        f"    below plane 0. 0. 1. {lipid.head_to_tail_distance * 0.1:.2f}",
                         f"  end atoms",
                         f"  atoms {lipid.headgroup_atom_index}",
-                        f"    over plane 0. 0. 1. {lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.15:.2f}",
+                        f"    over plane 0. 0. 1. {lipid.head_to_tail_distance * 1.1 - lipid.head_to_tail_distance * 0.1:.2f}",  
                         f"  end atoms",
                         "end structure",
                         ""
@@ -136,19 +137,26 @@ def build_packmol_input(
                     lines.extend([
                         f"structure {lipid.name}.pdb",
                         f"  number {count}",
-                        f"  inside box 0. 0. -{lipid.head_to_tail_distance * 1.15:.2f} {xy:.2f} {xy:.2f} 0.",
+                        f"  inside box 0. 0. -{lipid.head_to_tail_distance * 1.1:.2f} {xy:.2f} {xy:.2f} 0.",
                         f"  atoms {lipid.tailgroup_atom_index}",
-                        f"    over plane 0. 0. 1. -{lipid.head_to_tail_distance * 0.15:.2f}",
+                        f"    over plane 0. 0. 1. -{lipid.head_to_tail_distance * 0.1:.2f}",
                         f"  end atoms",
                         f"  atoms {lipid.headgroup_atom_index}",
-                        f"    below plane 0. 0. 1. -{lipid.head_to_tail_distance - lipid.head_to_tail_distance * 0.15:.2f}",
+                        f"    below plane 0. 0. 1. -{lipid.head_to_tail_distance * 1.1 - lipid.head_to_tail_distance * 0.1:.2f}",
                         f"  end atoms",
                         "end structure",
                         ""
                     ])
 
-    max_z_top = max(lipid.head_to_tail_distance * 1.05 for i, lipid in enumerate(lipids) if lipid_counts[2*i] > 0)
-    max_z_bottom = max(lipid.head_to_tail_distance * 1.05 for i, lipid in enumerate(lipids) if lipid_counts[2*i+1] > 0)
+    max_z_top = max(
+        (lipid.head_to_tail_distance * 1.1 for i, lipid in enumerate(lipids) if lipid_counts[2*i] > 0),
+        default=0.0,
+    )
+    max_z_bottom = max(
+        (lipid.head_to_tail_distance * 1.1 for i, lipid in enumerate(lipids) if lipid_counts[2*i+1] > 0),
+        default=0.0,
+    )
+    solvent_layer_thickness = 0.0
     
     if solvent_name:
         density_water = 1e-21 / 18.01  # mol/nm^3  experimental density of water
@@ -163,7 +171,7 @@ def build_packmol_input(
         lines.extend([
             f"structure {solvent_name}.pdb",
             f"  number {int(solvent_count / 2)}",
-            f"  inside box 0. 0. {z_start_top * 0.8 :.2f} {xy:.2f} {xy:.2f} {z_start_top * 0.8 + solvent_layer_thickness:.2f}",
+            f"  inside box 0. 0. {z_start_top * 1 :.2f} {xy:.2f} {xy:.2f} {z_start_top * 1 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
         ])
@@ -172,7 +180,7 @@ def build_packmol_input(
         lines.extend([
             f"structure {solvent_name}.pdb",
             f"  number {int(solvent_count / 2)}",
-            f"  inside box 0. 0. {z_start_bottom * 0.8 :.2f} {xy:.2f} {xy:.2f} {z_start_bottom* 0.8 + solvent_layer_thickness:.2f}",
+            f"  inside box 0. 0. {z_start_bottom * 1 :.2f} {xy:.2f} {xy:.2f} {z_start_bottom* 1 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
         ])
@@ -196,8 +204,10 @@ def build_packmol_input(
         "solvent_count": solvent_count,
         "box_dimensions": box_dims,
         "input_name": input_name,
-        "output_name": output_name
-        
+        "output_name": output_name,
+        "force_field_file": force_field_file,
+        "charge_model": charge_model,
+        "hmr": hmr
     }
     save_config(cwd / "config.json", config)
 
@@ -211,7 +221,7 @@ def run_packmol(
     parameterize: bool,
     force_field_file: str,
     hmr: bool,
-    charge_model: str = 'openff-gnn-am1bcc-0.1.0-rc.3.pt', #defaults to NAGL charges 
+    charge_model: str,
     config_path: str = "config.json"
     ):
     """Run Packmol to generate coordinates and parameterize the system with optional HMR."""
@@ -238,13 +248,19 @@ def run_packmol(
     solvent_name = config['parameters']['solvent_name']
     solvent_count = config['parameters']['solvent_count']
     packmol_output = config['parameters']['output_name']
+    # Add charge model and froce field file and HMR 
+
 
     # Paths
-    lipid_library_path = DATA_DIR / "available-lipids" / "PulledLipid.csv"
-    force_field_path = DATA_DIR / "forcefields" / force_field_file
+    lipid_library_path = LIPID_LIBRARY_PATH
+    force_field_path = resolve_force_field_path(force_field_file)
 
     if not force_field_path.exists():
-        raise FileNotFoundError(f"Force field file not found: {force_field_path}")
+        packaged_force_fields = ", ".join(path.name for path in sorted(FORCEFIELD_DIR.glob("*.offxml")))
+        raise FileNotFoundError(
+            f"Force field file not found: {force_field_path}. "
+            f"Packaged force fields: {packaged_force_fields or 'none'}"
+        )
 
     lipid_library = pd.read_csv(lipid_library_path)
     forcefield = ForceField(force_field_path)
@@ -267,6 +283,8 @@ def run_packmol(
             molecule.assign_partial_charges("am1bcc")
         elif charge_model.lower() == "gasteiger":
             molecule.assign_partial_charges("gasteiger")
+        elif charge_model.lower() == "am1bccelf10":
+            molecule.assign_partial_charges("am1bccelf10")
         else:
             raise ValueError(f"Unsupported charge model: {charge_model}")
         

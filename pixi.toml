@@ -1,0 +1,33 @@
+[workspace]
+name = "lipidbuilder"
+version = "0.1.0"
+description = "Build and parameterize lipid bilayer systems with Packmol and OpenFF."
+channels = ["conda-forge", "openeye"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.10,<3.12"
+pip = "*"
+ambertools = "*"
+mdtraj = "*"
+numpy = "*"
+openeye-toolkits = "*"
+openff-forcefields = "*"
+openff-interchange = "*"
+openff-nagl = "*"
+openff-toolkit = ">=0.16"
+openff-units = "*"
+openmm = ">=8.1.1"
+openmmforcefields = ">=0.12"
+openmmtools = "*"
+packmol = "*"
+pandas = "*"
+pytest = "*"
+
+[pypi-dependencies]
+lipidbuilder = { path = ".", editable = true }
+
+[tasks]
+test = "pytest"
+list-lipids = "python -m lipidbuilder.lipid list_available_lipids"
+build-example = "python lipidbuilder/How_to_use.py"

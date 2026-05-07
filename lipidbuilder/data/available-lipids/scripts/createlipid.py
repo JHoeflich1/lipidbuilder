@@ -118,8 +118,9 @@ def calcLipidLength(lipid, Lipid_name):
     lipid.distance = calc_distance[0][0] 
     
     # write in the atom index into object
-    lipid.headgroup_atom_index = head_group[0].index 
-    lipid.tailgroup_atom_index = tail_group[0].index 
+    lipid.headgroup_atom_index = head_group[0].index + 1  # Convert 0-based to 1-based
+    lipid.tailgroup_atom_index = tail_group[0].index + 1  # Convert 0-based to 1-based
+    print(f"lipid tailgroup atom index: {lipid.tailgroup_atom_index}, headgroup atom index: {lipid.headgroup_atom_index}")
 
 def lipidToDict(lipid):
     return {
