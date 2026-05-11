@@ -6,7 +6,7 @@ parameterizes them with OpenFF.
 ## Layout
 
 - `lipidbuilder/` - Python package source.
-- `lipidbuilder/data/available-lipids/` - lipid metadata, lipid PDBs, and solvent PDBs.
+- `lipidbuilder/data/available-molecules/` - lipid metadata, lipid PDBs, solvent PDBs, and ion PDBs.
 - `lipidbuilder/data/forcefields/` - packaged force-field files.
 - `lipidbuilder/results/lipid_system/` - default output folder for generated systems.
 - `lipidbuilder/How_to_use.py` - runnable example.
@@ -40,6 +40,8 @@ builder = LipidSystemBuilder(
     lipid_types=["POPC"],
     lipid_composition=[64, 64],
     hydration_level=40,
+    ion_type="Na",
+    ion_count=8,
     use_hmr=True,
 )
 
@@ -48,6 +50,10 @@ builder.setup()
 
 `force_field_file` can be either a filename in `lipidbuilder/data/forcefields/`
 or an absolute path to another `.offxml` file.
+
+`ion_type` is optional and supports `"Na"` or `"Cl"`. `ion_count` is the total
+number of ions to add; Packmol splits them between the top and bottom solvent
+layers.
 
 For each lipid, `lipid_composition` takes two values: top leaflet count, then
 bottom leaflet count. For example, `lipid_types=["POPC", "POPE"]` expects

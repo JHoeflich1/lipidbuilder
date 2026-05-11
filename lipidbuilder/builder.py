@@ -25,6 +25,8 @@ class LipidSystemBuilder:
         lipid_types: Optional[List[str]] = None,
         lipid_composition: Optional[List[int]] = None,
         hydration_level: int = 0, 
+        ion_type: Optional[str] = None,
+        ion_count: int = 0,
         ion: Optional[str] = None,
         ion_concentration: Optional[float] = None,
         use_hmr: bool = False,
@@ -57,8 +59,12 @@ class LipidSystemBuilder:
             Count of each lipid species in each leaflet [top, bottom], ordered as in lipid_types.
         hydration_level : int
             Number of water molecules per lipid.
+        ion_type : str, optional
+            Ion type to add. Supported values are "Na" and "Cl".
+        ion_count : int
+            Total number of ions to place, split between the top and bottom solvent layers.
         ion : str, optional
-            Ion type to add (e.g., "Na+", "Cl-").
+            Deprecated alias for ion_type.
         ion_concentration : float, optional
             Molar concentration of ions.
         use_hmr: default False
@@ -95,7 +101,16 @@ class LipidSystemBuilder:
         self.simulation_platform = simulation_platform
         self.gmx_executable = gmx_executable
         self.hydration_level = hydration_level
-        self.ion = ion
+        self.ion_type = ion_type if ion_type is not None else ion
+        if self.ion_type is not None:
+            normalized_ion = self.ion_type.strip().capitalize()
+            if normalized_ion not in {"Na", "Cl"}:
+                raise ValueError("ion_type must be either 'Na' or 'Cl'.")
+            self.ion_type = normalized_ion
+        if ion_count < 0:
+            raise ValueError("ion_count must be non-negative.")
+        self.ion_count = int(ion_count)
+        self.ion = self.ion_type
         self.ionic_concentration = ion_concentration
         self.use_hmr = use_hmr if hmr is None else hmr
 
@@ -128,6 +143,8 @@ class LipidSystemBuilder:
                 force_field_file=self.force_field_file,
                 charge_model=self.charge_model,
                 hmr=self.use_hmr,
+                ion_type=self.ion_type,
+                ion_count=self.ion_count,
                 tolerance=2.0,
             )
 

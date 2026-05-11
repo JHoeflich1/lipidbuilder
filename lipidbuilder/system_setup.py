@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import mdtraj
 import numpy as np
@@ -17,6 +17,7 @@ from openff.units import unit
 from .lipid import Lipid
 from .utils import (
     FORCEFIELD_DIR,
+    ION_PDB_DIR,
     LIPID_LIBRARY_PATH,
     LIPID_PDB_DIR,
     SOLVENT_PDB_DIR,
@@ -64,6 +65,8 @@ def build_packmol_input(
     force_field_file: str,
     charge_model: str,
     hmr: bool,
+    ion_type: Optional[str] = None,
+    ion_count: int = 0,
     tolerance: float = 2.0,
     input_name: str = "packmol_input.inp",
     ) -> Tuple[str, List[float]]:
@@ -83,6 +86,21 @@ def build_packmol_input(
             if not src.exists():
                 raise FileNotFoundError(f"Solvent file {src} does not exist.")
             shutil.copy(src, dst)
+
+    if ion_type is not None:
+        ion_type = ion_type.strip().capitalize()
+        if ion_type not in {"Na", "Cl"}:
+            raise ValueError("ion_type must be either 'Na' or 'Cl'.")
+    if ion_count < 0:
+        raise ValueError("ion_count must be non-negative.")
+    ion_count = int(ion_count)
+    ion_file_stem = ion_type.lower() if ion_type else None
+    if ion_type and ion_count > 0:
+        src = ION_PDB_DIR / f"{ion_file_stem}.pdb"
+        dst = cwd / f"{ion_file_stem}.pdb"
+        if not src.exists():
+            raise FileNotFoundError(f"Ion file {src} does not exist.")
+        shutil.copy(src, dst)
 
 
 
@@ -158,8 +176,10 @@ def build_packmol_input(
     )
     solvent_layer_thickness = 0.0
     
-    if solvent_name:
+    if solvent_name and solvent_count > 0:
         density_water = 1e-21 / 18.01  # mol/nm^3  experimental density of water
+        top_solvent_count = solvent_count // 2 + solvent_count % 2
+        bottom_solvent_count = solvent_count // 2
         water_per_layer = solvent_count / 2
         fudge_factor_packing = 2
         #estimate volume needed to contain a number of water molecuels per layer
@@ -170,7 +190,7 @@ def build_packmol_input(
         z_start_top = max_z_top
         lines.extend([
             f"structure {solvent_name}.pdb",
-            f"  number {int(solvent_count / 2)}",
+            f"  number {top_solvent_count}",
             f"  inside box 0. 0. {z_start_top * 1 :.2f} {xy:.2f} {xy:.2f} {z_start_top * 1 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
@@ -179,11 +199,42 @@ def build_packmol_input(
         z_start_bottom = -max_z_bottom - solvent_layer_thickness
         lines.extend([
             f"structure {solvent_name}.pdb",
-            f"  number {int(solvent_count / 2)}",
+            f"  number {bottom_solvent_count}",
             f"  inside box 0. 0. {z_start_bottom * 1 :.2f} {xy:.2f} {xy:.2f} {z_start_bottom* 1 + solvent_layer_thickness:.2f}",
             "end structure",
             ""
         ])
+
+    if ion_type and ion_count > 0:
+        top_ion_count = ion_count // 2 + ion_count % 2
+        bottom_ion_count = ion_count // 2
+
+        if solvent_layer_thickness > 0:
+            z_top_min = max_z_top
+            z_top_max = max_z_top + solvent_layer_thickness
+            z_bottom_min = -max_z_bottom - solvent_layer_thickness
+            z_bottom_max = -max_z_bottom
+        else:
+            padding = 10.0
+            z_top_min = max_z_top
+            z_top_max = max_z_top + padding
+            z_bottom_min = -max_z_bottom - padding
+            z_bottom_max = -max_z_bottom
+            solvent_layer_thickness = padding
+
+        for count, z_min, z_max in [
+            (top_ion_count, z_top_min, z_top_max),
+            (bottom_ion_count, z_bottom_min, z_bottom_max),
+        ]:
+            if count <= 0:
+                continue
+            lines.extend([
+                f"structure {ion_file_stem}.pdb",
+                f"  number {count}",
+                f"  inside box 0. 0. {z_min:.2f} {xy:.2f} {xy:.2f} {z_max:.2f}",
+                "end structure",
+                ""
+            ])
 
     # What is our final z dimension for box_dims?
 
@@ -202,6 +253,8 @@ def build_packmol_input(
         "lipid_counts": lipid_counts,
         "solvent_name": solvent_name,
         "solvent_count": solvent_count,
+        "ion_type": ion_type,
+        "ion_count": ion_count,
         "box_dimensions": box_dims,
         "input_name": input_name,
         "output_name": output_name,
@@ -247,6 +300,8 @@ def run_packmol(
     lipid_counts = config['parameters']['lipid_counts']
     solvent_name = config['parameters']['solvent_name']
     solvent_count = config['parameters']['solvent_count']
+    ion_type = config['parameters'].get('ion_type')
+    ion_count = int(config['parameters'].get('ion_count', 0) or 0)
     packmol_output = config['parameters']['output_name']
     # Add charge model and froce field file and HMR 
 
@@ -301,12 +356,28 @@ def run_packmol(
         all_lipids.extend([lipid]*top_count)
         all_lipids.extend([lipid]*bottom_count)
 
-    solvent_name = config['parameters']['solvent_name']
-    solvent_mol = Molecule.from_file(f"{solvent_name}.pdb")
-    for atom in solvent_mol.atoms:
-        atom.metadata["residue_name"] = solvent_name.upper()
+    solvent_mol = None
+    if solvent_name and solvent_count > 0:
+        solvent_mol = Molecule.from_file(f"{solvent_name}.pdb")
+        for atom in solvent_mol.atoms:
+            atom.metadata["residue_name"] = solvent_name.upper()
 
-    all_molecules = all_lipids + [solvent_mol] * solvent_count
+    ion_mol = None
+    if ion_type and ion_count > 0:
+        ion_smiles = {"Na": "[Na+]", "Cl": "[Cl-]"}[ion_type]
+        ion_mol = Molecule.from_smiles(ion_smiles)
+        ion_mol.name = ion_type
+        ion_charge = {"Na": 1.0, "Cl": -1.0}[ion_type]
+        ion_mol.partial_charges = np.array([ion_charge]) * unit.elementary_charge
+        for atom in ion_mol.atoms:
+            atom.name = ion_type
+            atom.metadata["residue_name"] = ion_type.upper()
+
+    all_molecules = all_lipids
+    if solvent_mol is not None:
+        all_molecules.extend([solvent_mol] * solvent_count)
+    if ion_mol is not None:
+        all_molecules.extend([ion_mol] * ion_count)
 
     topology = Topology.from_molecules(all_molecules)
     traj = mdtraj.load(packmol_output)
@@ -316,7 +387,7 @@ def run_packmol(
     interchange = Interchange.from_smirnoff(
         force_field=forcefield,
         topology=topology,
-        charge_from_molecules=lipid_molecules,
+        charge_from_molecules=lipid_molecules + ([ion_mol] if ion_mol is not None else []),
     )
 
     if hmr:

@@ -7,17 +7,19 @@ DATA_DIR = PACKAGE_DIR / "data"
 RESULTS_DIR = PACKAGE_DIR / "results"
 DEFAULT_RESULTS_DIR = RESULTS_DIR / "lipid_system"
 
-AVAILABLE_LIPIDS_DIR = DATA_DIR / "available-lipids"
-LIPID_LIBRARY_PATH = AVAILABLE_LIPIDS_DIR / "PulledLipid.csv"
-LIPID_PDB_DIR = AVAILABLE_LIPIDS_DIR / "lipid_pdbs"
-SOLVENT_PDB_DIR = AVAILABLE_LIPIDS_DIR / "solvent_pdbs"
+AVAILABLE_MOLECULES_DIR = DATA_DIR / "available-molecules"
+LIPID_LIBRARY_PATH = AVAILABLE_MOLECULES_DIR / "PulledLipid.csv"
+LIPID_PDB_DIR = AVAILABLE_MOLECULES_DIR / "lipid_pdbs"
+SOLVENT_PDB_DIR = AVAILABLE_MOLECULES_DIR / "solvent_pdbs"
+ION_PDB_DIR = AVAILABLE_MOLECULES_DIR / "ion_pdbs"
 FORCEFIELD_DIR = DATA_DIR / "forcefields"
 
 # Backward-compatible aliases for older scripts.
 ROOT_DIR = PACKAGE_DIR
-LIP_DIR = AVAILABLE_LIPIDS_DIR
+AVAILABLE_LIPIDS_DIR = AVAILABLE_MOLECULES_DIR
+LIP_DIR = AVAILABLE_MOLECULES_DIR
 
-SCRATCH_DIR = AVAILABLE_LIPIDS_DIR / "scripts" / "scratch"
+SCRATCH_DIR = AVAILABLE_MOLECULES_DIR / "scripts" / "scratch"
 
 
 def resolve_force_field_path(force_field_file: str | Path) -> Path:

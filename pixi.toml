@@ -10,6 +10,8 @@ python = ">=3.10,<3.12"
 pip = "*"
 ambertools = "*"
 mdtraj = "*"
+mdanalysis = "*"
+nglview = "*"
 numpy = "*"
 openeye-toolkits = "*"
 openff-forcefields = "*"
@@ -31,3 +33,6 @@ lipidbuilder = { path = ".", editable = true }
 test = "pytest"
 list-lipids = "python -m lipidbuilder.lipid list_available_lipids"
 build-example = "python lipidbuilder/How_to_use.py"
+
+[environments]
+lipidbuilder = ["default"] 

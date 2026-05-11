@@ -52,3 +52,28 @@ def test_hmr_suffix_is_added_to_system_name(tmp_path):
     )
 
     assert builder.system_name.endswith("-HMR")
+
+
+def test_ion_type_validation(tmp_path):
+    builder = LipidSystemBuilder(
+        result_directory=tmp_path,
+        force_field_name="openff-2.2.0",
+        water_model_name="tip3p",
+        force_field_file="openff-2.2.0.offxml",
+        charge_model="am1bcc",
+        lipid_types=["POPC"],
+        lipid_composition=[1, 1],
+        ion_type="cl",
+        ion_count=4,
+    )
+
+    assert builder.ion_type == "Cl"
+    assert builder.ion_count == 4
+
+    with pytest.raises(ValueError, match="ion_type"):
+        LipidSystemBuilder(
+            result_directory=tmp_path,
+            lipid_types=["POPC"],
+            lipid_composition=[1, 1],
+            ion_type="K",
+        )

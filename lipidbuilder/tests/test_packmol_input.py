@@ -38,3 +38,33 @@ def test_build_packmol_input(tmp_path):
     assert config["parameters"]["solvent_name"] == test_solvent
     assert (tmp_path / "POPC.pdb").is_file()
     assert (tmp_path / "tip3p.pdb").is_file()
+
+
+def test_build_packmol_input_with_ions(tmp_path):
+    original_dir = Path.cwd()
+
+    os.chdir(tmp_path)
+    try:
+        inp_path, _ = build_packmol_input(
+            lipid_names=["POPC"],
+            lipid_counts=[2, 2],
+            solvent_name="tip3p",
+            solvent_count=10,
+            force_field_file="openff-2.2.0.offxml",
+            charge_model="am1bcc",
+            hmr=False,
+            ion_type="Na",
+            ion_count=5,
+        )
+    finally:
+        os.chdir(original_dir)
+
+    packmol_input = Path(inp_path).read_text()
+    config = json.loads((tmp_path / "config.json").read_text())
+
+    assert config["parameters"]["ion_type"] == "Na"
+    assert config["parameters"]["ion_count"] == 5
+    assert (tmp_path / "na.pdb").is_file()
+    assert "structure na.pdb" in packmol_input
+    assert "  number 3" in packmol_input
+    assert "  number 2" in packmol_input

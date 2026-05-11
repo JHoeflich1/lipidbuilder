@@ -15,9 +15,10 @@ setup(
     include_package_data=True,
     package_data={
         "lipidbuilder": [
-            "data/available-lipids/PulledLipid.csv",
-            "data/available-lipids/lipid_pdbs/*/*.pdb",
-            "data/available-lipids/solvent_pdbs/*.pdb",
+            "data/available-molecules/PulledLipid.csv",
+            "data/available-molecules/lipid_pdbs/*/*.pdb",
+            "data/available-molecules/solvent_pdbs/*.pdb",
+            "data/available-molecules/ion_pdbs/*.pdb",
             "data/forcefields/*.offxml",
         ],
     },
