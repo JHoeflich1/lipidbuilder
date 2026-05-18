@@ -6,7 +6,7 @@ parameterizes them with OpenFF.
 ## Layout
 
 - `lipidbuilder/` - Python package source.
-- `lipidbuilder/data/available-molecules/` - lipid metadata, lipid PDBs, solvent PDBs, and ion PDBs.
+- `lipidbuilder/data/available-molecules/` - lipid metadata, lipid PDBs, and solvent PDBs.
 - `lipidbuilder/data/forcefields/` - packaged force-field files.
 - `lipidbuilder/results/lipid_system/` - default output folder for generated systems.
 - `lipidbuilder/How_to_use.py` - runnable example.
@@ -28,6 +28,9 @@ pixi run build-example
 
 ## Python Example
 
+cd lipidbuilder
+pixi run python How_to_use.py
+
 ```python
 from lipidbuilder import LipidSystemBuilder
 
@@ -40,8 +43,7 @@ builder = LipidSystemBuilder(
     lipid_types=["POPC"],
     lipid_composition=[64, 64],
     hydration_level=40,
-    ion_type="Na",
-    ion_count=8,
+    neutralize_ions=True,
     use_hmr=True,
 )
 
@@ -51,9 +53,17 @@ builder.setup()
 `force_field_file` can be either a filename in `lipidbuilder/data/forcefields/`
 or an absolute path to another `.offxml` file.
 
-`ion_type` is optional and supports `"Na"` or `"Cl"`. `ion_count` is the total
-number of ions to add; Packmol splits them between the top and bottom solvent
-layers.
+Set `neutralize_ions=True` to run GROMACS after Packmol. The builder writes
+`ions.mdp`, creates a temporary `pre_ions.gro`/`pre_ions.top`, runs `gmx grompp`
+and `gmx genion -neutral`, then rebuilds the final OpenFF Interchange system
+from `system_solv.gro` with the inserted `NA`/`CL` ions. `hydration_level` is
+treated as the target final water/lipid ratio: when neutralization is enabled,
+Packmol starts with extra waters equal to the estimated neutralizing ion count,
+then the final config reports `ion_counts`, `waters_replaced_by_ions`, and
+`final_hydration_level`. By default `genion` selects the solvent group using the
+solvent residue name, such as `TIP3P`; override this with `ion_solvent_group`
+if your GROMACS groups differ. GROMACS command output is written to
+`grompp_ions.log` and `genion_ions.log`.
 
 For each lipid, `lipid_composition` takes two values: top leaflet count, then
 bottom leaflet count. For example, `lipid_types=["POPC", "POPE"]` expects

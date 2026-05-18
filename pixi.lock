@@ -3298,7 +3298,7 @@ packages:
 - pypi: ./
   name: lipidbuilder
   version: 0.1.0
-  sha256: e15c997a08390275ec1d0d0e4408bcac50bace845256e4c1a514e70b7e0e12bd
+  sha256: d9176fd91a78f2c3b9978811d2909076750ac92f7b7a7f6ddd7c308977af82b3
   requires_python: '>=3.10,<3.12'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.47.0-py311h41a00d4_1.conda
   sha256: 689cc23dc0f80c008094931aaa54ec229dd9dbabd169e825e13ea262d5e6dade

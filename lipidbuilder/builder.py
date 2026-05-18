@@ -25,10 +25,8 @@ class LipidSystemBuilder:
         lipid_types: Optional[List[str]] = None,
         lipid_composition: Optional[List[int]] = None,
         hydration_level: int = 0, 
-        ion_type: Optional[str] = None,
-        ion_count: int = 0,
-        ion: Optional[str] = None,
-        ion_concentration: Optional[float] = None,
+        neutralize_ions: bool = False,
+        ion_solvent_group: Optional[str] = None,
         use_hmr: bool = False,
         hmr: Optional[bool] = None,
     ):
@@ -58,15 +56,11 @@ class LipidSystemBuilder:
         lipid_composition : list of int, optional
             Count of each lipid species in each leaflet [top, bottom], ordered as in lipid_types.
         hydration_level : int
-            Number of water molecules per lipid.
-        ion_type : str, optional
-            Ion type to add. Supported values are "Na" and "Cl".
-        ion_count : int
-            Total number of ions to place, split between the top and bottom solvent layers.
-        ion : str, optional
-            Deprecated alias for ion_type.
-        ion_concentration : float, optional
-            Molar concentration of ions.
+            Target final number of water molecules per lipid.
+        neutralize_ions : bool
+            Replace waters with NA/CL ions using GROMACS genion -neutral after Packmol.
+        ion_solvent_group : str
+            GROMACS group selected by genion for solvent replacement. Defaults to the solvent residue name.
         use_hmr: default False
             Parametierize your system w/ HMR
         """
@@ -101,17 +95,8 @@ class LipidSystemBuilder:
         self.simulation_platform = simulation_platform
         self.gmx_executable = gmx_executable
         self.hydration_level = hydration_level
-        self.ion_type = ion_type if ion_type is not None else ion
-        if self.ion_type is not None:
-            normalized_ion = self.ion_type.strip().capitalize()
-            if normalized_ion not in {"Na", "Cl"}:
-                raise ValueError("ion_type must be either 'Na' or 'Cl'.")
-            self.ion_type = normalized_ion
-        if ion_count < 0:
-            raise ValueError("ion_count must be non-negative.")
-        self.ion_count = int(ion_count)
-        self.ion = self.ion_type
-        self.ionic_concentration = ion_concentration
+        self.neutralize_ions = bool(neutralize_ions)
+        self.ion_solvent_group = ion_solvent_group
         self.use_hmr = use_hmr if hmr is None else hmr
 
         # Define system naming and paths
@@ -143,8 +128,7 @@ class LipidSystemBuilder:
                 force_field_file=self.force_field_file,
                 charge_model=self.charge_model,
                 hmr=self.use_hmr,
-                ion_type=self.ion_type,
-                ion_count=self.ion_count,
+                neutralize_ions=self.neutralize_ions,
                 tolerance=2.0,
             )
 
@@ -158,6 +142,8 @@ class LipidSystemBuilder:
                 force_field_file=self.force_field_file,
                 hmr=self.use_hmr,
                 charge_model=self.charge_model,
+                gmx_executable=self.gmx_executable,
+                solvent_group=self.ion_solvent_group,
                 config_path="config.json",
             )
 

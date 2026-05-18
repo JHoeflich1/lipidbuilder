@@ -11,7 +11,6 @@ AVAILABLE_MOLECULES_DIR = DATA_DIR / "available-molecules"
 LIPID_LIBRARY_PATH = AVAILABLE_MOLECULES_DIR / "PulledLipid.csv"
 LIPID_PDB_DIR = AVAILABLE_MOLECULES_DIR / "lipid_pdbs"
 SOLVENT_PDB_DIR = AVAILABLE_MOLECULES_DIR / "solvent_pdbs"
-ION_PDB_DIR = AVAILABLE_MOLECULES_DIR / "ion_pdbs"
 FORCEFIELD_DIR = DATA_DIR / "forcefields"
 
 # Backward-compatible aliases for older scripts.

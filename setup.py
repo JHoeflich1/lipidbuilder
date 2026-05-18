@@ -18,8 +18,8 @@ setup(
             "data/available-molecules/PulledLipid.csv",
             "data/available-molecules/lipid_pdbs/*/*.pdb",
             "data/available-molecules/solvent_pdbs/*.pdb",
-            "data/available-molecules/ion_pdbs/*.pdb",
             "data/forcefields/*.offxml",
+            "data/gromacs/*.mdp",
         ],
     },
     classifiers=[

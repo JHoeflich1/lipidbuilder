@@ -2,9 +2,10 @@ import json
 import time
 import shutil
 import subprocess
+import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import mdtraj
 import numpy as np
@@ -17,7 +18,6 @@ from openff.units import unit
 from .lipid import Lipid
 from .utils import (
     FORCEFIELD_DIR,
-    ION_PDB_DIR,
     LIPID_LIBRARY_PATH,
     LIPID_PDB_DIR,
     SOLVENT_PDB_DIR,
@@ -25,6 +25,31 @@ from .utils import (
 )
 
 # functions for seting up packmol input file, running and minimizing 
+
+IONS_MDP = """; ions.mdp - used as input into grompp to generate ions.tpr
+; Parameters describing what to do, when to stop and what to save
+integrator  = steep         ; Algorithm (steep = steepest descent minimization)
+emtol       = 1000.0        ; Stop minimization when the maximum force < 1000.0 kJ/mol/nm
+emstep      = 0.01          ; Minimization step size
+nsteps      = 50000         ; Maximum number of (minimization) steps to perform
+
+; Parameters describing how to find the neighbors of each atom and how to calculate the interactions
+nstlist         = 1         ; Frequency to update the neighbor list and long range forces
+cutoff-scheme   = Verlet    ; Buffered neighbor searching
+ns_type         = grid      ; Method to determine neighbor list (simple, grid)
+rlist           = 1.2       ; Cut-off for making neighbor list (short range forces)
+coulombtype     = cutoff    ; Treatment of long range electrostatic interactions
+rcoulomb        = 1.2       ; Short-range electrostatic cut-off
+rvdw            = 1.2       ; Short-range Van der Waals cut-off
+pbc             = xyz       ; Periodic Boundary Conditions in all 3 dimensions
+"""
+
+
+def write_ions_mdp(path: str | Path = "ions.mdp") -> Path:
+    """Write the GROMACS MDP file used to generate ions.tpr for genion."""
+    path = Path(path)
+    path.write_text(IONS_MDP)
+    return path
 
 def copy_lipid_files(lipids: List[Lipid], source_dir: Path = None, dest_dir: Path = None):
     """Copy each lipid's .pdb and .top file to the working directory."""
@@ -57,6 +82,52 @@ def save_config(file_path: Path, data: dict):
         json.dump(data, f, indent=4)
 
 
+def _format_charge(charge: float) -> str:
+    if abs(charge - round(charge)) < 1e-6:
+        return f"{int(round(charge)):+d}"
+    return f"{charge:+.3f}"
+
+
+def estimate_bilayer_charge(
+    lipid_names: List[str],
+    lipid_counts: List[int],
+    lipid_library_path: Path = LIPID_LIBRARY_PATH,
+) -> float:
+    """Estimate the bilayer formal charge from lipid SMILES."""
+    lipid_library = pd.read_csv(lipid_library_path)
+    total_charge = 0.0
+    for lipid_index, name in enumerate(lipid_names):
+        try:
+            smiles = lipid_library[lipid_library["Name"] == name]["Smiles String"].values[0]
+        except IndexError:
+            raise ValueError(f"Lipid '{name}' not found in lipid library: {lipid_library_path}")
+
+        molecule = Molecule.from_smiles(smiles, allow_undefined_stereo=True)
+        lipid_charge = molecule.total_charge.m_as(unit.elementary_charge)
+        total_count = lipid_counts[2*lipid_index] + lipid_counts[2*lipid_index+1]
+        total_charge += lipid_charge * total_count
+
+    return total_charge
+
+
+def estimate_neutralizing_ion_counts(
+    lipid_names: List[str],
+    lipid_counts: List[int],
+    lipid_library_path: Path = LIPID_LIBRARY_PATH,
+) -> Dict[str, int]:
+    """Estimate neutralizing NA/CL counts from lipid formal charges."""
+    total_charge = estimate_bilayer_charge(
+        lipid_names,
+        lipid_counts,
+        lipid_library_path=lipid_library_path,
+    )
+    rounded_charge = int(round(total_charge))
+    return {
+        "NA": max(-rounded_charge, 0),
+        "CL": max(rounded_charge, 0),
+    }
+
+
 def build_packmol_input(
     lipid_names: List[str],
     lipid_counts: List[int],
@@ -65,8 +136,7 @@ def build_packmol_input(
     force_field_file: str,
     charge_model: str,
     hmr: bool,
-    ion_type: Optional[str] = None,
-    ion_count: int = 0,
+    neutralize_ions: bool = False,
     tolerance: float = 2.0,
     input_name: str = "packmol_input.inp",
     ) -> Tuple[str, List[float]]:
@@ -86,23 +156,6 @@ def build_packmol_input(
             if not src.exists():
                 raise FileNotFoundError(f"Solvent file {src} does not exist.")
             shutil.copy(src, dst)
-
-    if ion_type is not None:
-        ion_type = ion_type.strip().capitalize()
-        if ion_type not in {"Na", "Cl"}:
-            raise ValueError("ion_type must be either 'Na' or 'Cl'.")
-    if ion_count < 0:
-        raise ValueError("ion_count must be non-negative.")
-    ion_count = int(ion_count)
-    ion_file_stem = ion_type.lower() if ion_type else None
-    if ion_type and ion_count > 0:
-        src = ION_PDB_DIR / f"{ion_file_stem}.pdb"
-        dst = cwd / f"{ion_file_stem}.pdb"
-        if not src.exists():
-            raise FileNotFoundError(f"Ion file {src} does not exist.")
-        shutil.copy(src, dst)
-
-
 
     area_per_lipid = 10  # not sure how I came on this value, but it works
     N_top = sum(lipid_counts[::2])
@@ -176,11 +229,36 @@ def build_packmol_input(
     )
     solvent_layer_thickness = 0.0
     
-    if solvent_name and solvent_count > 0:
+    total_lipid_count = sum(lipid_counts)
+    target_solvent_count = int(solvent_count)
+    estimated_bilayer_charge = 0.0
+    estimated_ion_counts = {"NA": 0, "CL": 0}
+    if neutralize_ions:
+        estimated_bilayer_charge = estimate_bilayer_charge(lipid_names, lipid_counts)
+        estimated_ion_counts = estimate_neutralizing_ion_counts(lipid_names, lipid_counts)
+    estimated_neutralizing_ions = sum(estimated_ion_counts.values())
+    packmol_solvent_count = target_solvent_count + estimated_neutralizing_ions
+
+    if neutralize_ions:
+        print(
+            "Ion neutralization requested: "
+            f"net formal charge of bilayer is {_format_charge(estimated_bilayer_charge)} e."
+        )
+        print(
+            "Estimated neutralizing ions: "
+            f"NA={estimated_ion_counts['NA']}, CL={estimated_ion_counts['CL']}."
+        )
+        print(
+            "Hydration target will be preserved by packing extra waters: "
+            f"target={target_solvent_count}, extra={estimated_neutralizing_ions}, "
+            f"Packmol waters={packmol_solvent_count}."
+        )
+
+    if solvent_name and packmol_solvent_count > 0:
         density_water = 1e-21 / 18.01  # mol/nm^3  experimental density of water
-        top_solvent_count = solvent_count // 2 + solvent_count % 2
-        bottom_solvent_count = solvent_count // 2
-        water_per_layer = solvent_count / 2
+        top_solvent_count = packmol_solvent_count // 2 + packmol_solvent_count % 2
+        bottom_solvent_count = packmol_solvent_count // 2
+        water_per_layer = packmol_solvent_count / 2
         fudge_factor_packing = 2
         #estimate volume needed to contain a number of water molecuels per layer
         volume_per_layer = water_per_layer / (density_water * 6.02e23) * fudge_factor_packing * 1000 # 3.5 is a fudge factor to give packmol room for packing
@@ -205,37 +283,6 @@ def build_packmol_input(
             ""
         ])
 
-    if ion_type and ion_count > 0:
-        top_ion_count = ion_count // 2 + ion_count % 2
-        bottom_ion_count = ion_count // 2
-
-        if solvent_layer_thickness > 0:
-            z_top_min = max_z_top
-            z_top_max = max_z_top + solvent_layer_thickness
-            z_bottom_min = -max_z_bottom - solvent_layer_thickness
-            z_bottom_max = -max_z_bottom
-        else:
-            padding = 10.0
-            z_top_min = max_z_top
-            z_top_max = max_z_top + padding
-            z_bottom_min = -max_z_bottom - padding
-            z_bottom_max = -max_z_bottom
-            solvent_layer_thickness = padding
-
-        for count, z_min, z_max in [
-            (top_ion_count, z_top_min, z_top_max),
-            (bottom_ion_count, z_bottom_min, z_bottom_max),
-        ]:
-            if count <= 0:
-                continue
-            lines.extend([
-                f"structure {ion_file_stem}.pdb",
-                f"  number {count}",
-                f"  inside box 0. 0. {z_min:.2f} {xy:.2f} {xy:.2f} {z_max:.2f}",
-                "end structure",
-                ""
-            ])
-
     # What is our final z dimension for box_dims?
 
     # Write Packmol input
@@ -245,6 +292,16 @@ def build_packmol_input(
 
     z = max_z_top + max_z_bottom + 2 * solvent_layer_thickness
     box_dims = [xy, xy, z]
+    target_hydration_level = (
+        target_solvent_count / total_lipid_count
+        if total_lipid_count > 0
+        else 0.0
+    )
+    packmol_hydration_level = (
+        packmol_solvent_count / total_lipid_count
+        if total_lipid_count > 0
+        else 0.0
+    )
 
     # Save config
     config = init_config_file()
@@ -252,9 +309,18 @@ def build_packmol_input(
         "lipid_names": lipid_names,
         "lipid_counts": lipid_counts,
         "solvent_name": solvent_name,
-        "solvent_count": solvent_count,
-        "ion_type": ion_type,
-        "ion_count": ion_count,
+        "solvent_count": packmol_solvent_count,
+        "target_solvent_count": target_solvent_count,
+        "packmol_solvent_count": packmol_solvent_count,
+        "target_hydration_level": target_hydration_level,
+        "packmol_hydration_level": packmol_hydration_level,
+        "hydration_level_basis": "final_target",
+        "estimated_bilayer_charge": estimated_bilayer_charge,
+        "estimated_neutralizing_ion_counts": estimated_ion_counts,
+        "estimated_neutralizing_ions": estimated_neutralizing_ions,
+        "neutralize_ions": neutralize_ions,
+        "positive_ion_name": "NA",
+        "negative_ion_name": "CL",
         "box_dimensions": box_dims,
         "input_name": input_name,
         "output_name": output_name,
@@ -269,12 +335,215 @@ def build_packmol_input(
     return str(packmol_file), box_dims
 
 
+def _make_ion_molecule(ion_name: str) -> Molecule:
+    smiles_by_name = {"NA": "[Na+]", "Na": "[Na+]", "CL": "[Cl-]", "Cl": "[Cl-]"}
+    charge_by_name = {"NA": 1.0, "Na": 1.0, "CL": -1.0, "Cl": -1.0}
+    if ion_name not in smiles_by_name:
+        raise ValueError(f"Unsupported ion name: {ion_name}")
+    molecule = Molecule.from_smiles(smiles_by_name[ion_name])
+    molecule.name = ion_name.upper()
+    molecule.partial_charges = np.array([charge_by_name[ion_name]]) * unit.elementary_charge
+    for atom in molecule.atoms:
+        atom.name = ion_name.upper()
+        atom.metadata["residue_name"] = ion_name.upper()
+    return molecule
+
+
+def _gro_residue_names(gro_path: str | Path) -> List[str]:
+    """Return contiguous residue names from a GRO file in coordinate order."""
+    residue_names = []
+    previous_residue = None
+    lines = Path(gro_path).read_text().splitlines()
+    for line in lines[2:-1]:
+        residue_id = line[:5].strip()
+        residue_name = line[5:10].strip()
+        residue_key = (residue_id, residue_name)
+        if residue_key != previous_residue:
+            residue_names.append(residue_name)
+            previous_residue = residue_key
+    return residue_names
+
+
+def _gro_residue_counts(gro_path: str | Path) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for residue_name in _gro_residue_names(gro_path):
+        counts[residue_name] = counts.get(residue_name, 0) + 1
+    return counts
+
+
+def _build_interchange(
+    coordinate_file: str,
+    output_prefix: str,
+    box_dims: List[float],
+    lipid_names: List[str],
+    lipid_counts: List[int],
+    solvent_name: str,
+    solvent_count: int,
+    forcefield: ForceField,
+    lipid_molecules: List[Molecule],
+    charge_model: str,
+    hmr: bool,
+    ion_counts: Optional[Dict[str, int]] = None,
+    preserve_coordinate_order: bool = False,
+) -> None:
+    all_lipids = []
+    for lipid_index, lipid in enumerate(lipid_molecules):
+        top_count = lipid_counts[2*lipid_index]
+        bottom_count = lipid_counts[2*lipid_index+1]
+        all_lipids.extend([lipid]*top_count)
+        all_lipids.extend([lipid]*bottom_count)
+
+    solvent_mol = None
+    if solvent_name and solvent_count > 0:
+        solvent_mol = Molecule.from_file(f"{solvent_name}.pdb")
+        solvent_mol.name = solvent_name.upper()
+        for atom in solvent_mol.atoms:
+            atom.metadata["residue_name"] = solvent_name.upper()
+
+    ion_counts = ion_counts or {}
+    ion_molecules = {
+        ion_name: _make_ion_molecule(ion_name)
+        for ion_name, count in ion_counts.items()
+        if count > 0
+    }
+
+    if preserve_coordinate_order:
+        molecule_by_residue_name = {lipid.name[:5]: lipid for lipid in lipid_molecules}
+        if solvent_mol is not None:
+            molecule_by_residue_name[solvent_name.upper()[:5]] = solvent_mol
+        molecule_by_residue_name.update(ion_molecules)
+        all_molecules = []
+        for residue_name in _gro_residue_names(coordinate_file):
+            molecule = molecule_by_residue_name.get(residue_name)
+            if molecule is None:
+                raise ValueError(
+                    f"Could not map residue '{residue_name}' in {coordinate_file} "
+                    "to a lipid, solvent, or ion molecule."
+                )
+            all_molecules.append(molecule)
+    else:
+        all_molecules = list(all_lipids)
+        if solvent_mol is not None:
+            all_molecules.extend([solvent_mol] * solvent_count)
+        for ion_name, count in ion_counts.items():
+            all_molecules.extend([ion_molecules[ion_name]] * count)
+
+    topology = Topology.from_molecules(all_molecules)
+    traj = mdtraj.load(coordinate_file)
+    topology.set_positions(traj.xyz[0] * unit.nanometer)
+    topology.box_vectors = np.array(box_dims) * 0.1 * unit.nanometer
+
+    charge_from_molecules = list(lipid_molecules) + list(ion_molecules.values())
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*torch\.distributed\.reduce_op.*",
+            category=FutureWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Ambiguous failure while processing constraints.*",
+            category=UserWarning,
+        )
+        interchange = Interchange.from_smirnoff(
+            force_field=forcefield,
+            topology=topology,
+            charge_from_molecules=charge_from_molecules,
+        )
+
+        if hmr:
+            interchange.to_gromacs(prefix=output_prefix, decimal=3, hydrogen_mass=3.0)
+        else:
+            interchange.to_gromacs(prefix=output_prefix)
+
+
+def neutralize_with_gromacs(
+    gro_file: str,
+    top_file: str,
+    solvent_group: str,
+    gmx_executable: str = "gmx",
+    maxwarn: int = 1,
+) -> Tuple[str, Dict[str, int]]:
+    """Use gmx genion to replace water with ions and return ion counts."""
+    mdp_path = write_ions_mdp("ions.mdp")
+    grompp_log = Path("grompp_ions.log")
+    genion_log = Path("genion_ions.log")
+    print(f"Wrote ion preparation MDP: {mdp_path}.")
+    print(f"Running GROMACS grompp to create ions.tpr. Log: {grompp_log}")
+    with open(grompp_log, "w") as log:
+        try:
+            subprocess.run(
+                [
+                    gmx_executable,
+                    "grompp",
+                    "-f",
+                    "ions.mdp",
+                    "-c",
+                    gro_file,
+                    "-p",
+                    top_file,
+                    "-o",
+                    "ions.tpr",
+                    "-maxwarn",
+                    str(maxwarn),
+                ],
+                check=True,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"GROMACS grompp failed. See {grompp_log}.") from exc
+    output_gro = "system_solv.gro"
+    print(
+        "Running GROMACS genion with "
+        f"pname=NA, nname=CL, neutral=True; selecting solvent group '{solvent_group}'. "
+        f"Log: {genion_log}"
+    )
+    with open(genion_log, "w") as log:
+        try:
+            subprocess.run(
+                [
+                    gmx_executable,
+                    "genion",
+                    "-s",
+                    "ions.tpr",
+                    "-o",
+                    output_gro,
+                    "-p",
+                    top_file,
+                    "-pname",
+                    "NA",
+                    "-nname",
+                    "CL",
+                    "-neutral",
+                ],
+                input=f"{solvent_group}\n",
+                text=True,
+                check=True,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"GROMACS genion failed while selecting solvent group '{solvent_group}'. "
+                f"See {genion_log}."
+            ) from exc
+    residue_counts = _gro_residue_counts(output_gro)
+    ion_counts = {
+        "NA": residue_counts.get("NA", 0),
+        "CL": residue_counts.get("CL", 0),
+    }
+    return output_gro, ion_counts
+
+
 def run_packmol(
     packmol_input_file: str,
     parameterize: bool,
     force_field_file: str,
     hmr: bool,
     charge_model: str,
+    gmx_executable: Optional[str] = None,
+    solvent_group: Optional[str] = None,
     config_path: str = "config.json"
     ):
     """Run Packmol to generate coordinates and parameterize the system with optional HMR."""
@@ -300,9 +569,16 @@ def run_packmol(
     lipid_counts = config['parameters']['lipid_counts']
     solvent_name = config['parameters']['solvent_name']
     solvent_count = config['parameters']['solvent_count']
-    ion_type = config['parameters'].get('ion_type')
-    ion_count = int(config['parameters'].get('ion_count', 0) or 0)
+    target_solvent_count = int(config['parameters'].get('target_solvent_count', solvent_count))
+    packmol_solvent_count = int(config['parameters'].get('packmol_solvent_count', solvent_count))
+    neutralize_ions = bool(config['parameters'].get('neutralize_ions', False))
     packmol_output = config['parameters']['output_name']
+    total_lipid_count = sum(lipid_counts)
+    estimated_bilayer_charge = float(config['parameters'].get('estimated_bilayer_charge', 0.0))
+    estimated_ion_counts = config['parameters'].get(
+        'estimated_neutralizing_ion_counts',
+        {"NA": 0, "CL": 0},
+    )
     # Add charge model and froce field file and HMR 
 
 
@@ -349,52 +625,91 @@ def run_packmol(
         molecule.generate_unique_atom_names()
         lipid_molecules.append(molecule)
 
-    all_lipids = [] # all_lipids is a flat list of Molecule objects representing every single lipid molecule that will go into the system. Used to build the topology. 
-    for lipid_index, lipid in enumerate(lipid_molecules):
-        top_count = lipid_counts[2*lipid_index]       # top leaflet
-        bottom_count = lipid_counts[2*lipid_index+1] # bottom leaflet
-        all_lipids.extend([lipid]*top_count)
-        all_lipids.extend([lipid]*bottom_count)
-
-    solvent_mol = None
-    if solvent_name and solvent_count > 0:
-        solvent_mol = Molecule.from_file(f"{solvent_name}.pdb")
-        for atom in solvent_mol.atoms:
-            atom.metadata["residue_name"] = solvent_name.upper()
-
-    ion_mol = None
-    if ion_type and ion_count > 0:
-        ion_smiles = {"Na": "[Na+]", "Cl": "[Cl-]"}[ion_type]
-        ion_mol = Molecule.from_smiles(ion_smiles)
-        ion_mol.name = ion_type
-        ion_charge = {"Na": 1.0, "Cl": -1.0}[ion_type]
-        ion_mol.partial_charges = np.array([ion_charge]) * unit.elementary_charge
-        for atom in ion_mol.atoms:
-            atom.name = ion_type
-            atom.metadata["residue_name"] = ion_type.upper()
-
-    all_molecules = all_lipids
-    if solvent_mol is not None:
-        all_molecules.extend([solvent_mol] * solvent_count)
-    if ion_mol is not None:
-        all_molecules.extend([ion_mol] * ion_count)
-
-    topology = Topology.from_molecules(all_molecules)
-    traj = mdtraj.load(packmol_output)
-    topology.set_positions(traj.xyz[0] * unit.nanometer)
-    topology.box_vectors = np.array(box_dims) * 0.1 * unit.nanometer # 0.1 to convert to nm from Angstrom 
-
-    interchange = Interchange.from_smirnoff(
-        force_field=forcefield,
-        topology=topology,
-        charge_from_molecules=lipid_molecules + ([ion_mol] if ion_mol is not None else []),
-    )
+    if neutralize_ions:
+        if not solvent_name or solvent_count <= 0:
+            raise ValueError("Ion neutralization requires solvent so genion can replace water molecules.")
+        print(
+            "Ion neutralization summary before GROMACS: "
+            f"net formal charge {_format_charge(estimated_bilayer_charge)} e; "
+            f"estimated ions NA={estimated_ion_counts.get('NA', 0)}, "
+            f"CL={estimated_ion_counts.get('CL', 0)}."
+        )
+        print("Writing pre-ionization GROMACS files...")
+        _build_interchange(
+            coordinate_file=packmol_output,
+            output_prefix="pre_ions",
+            box_dims=box_dims,
+            lipid_names=lipid_names,
+            lipid_counts=lipid_counts,
+            solvent_name=solvent_name,
+            solvent_count=solvent_count,
+            forcefield=forcefield,
+            lipid_molecules=lipid_molecules,
+            charge_model=charge_model,
+            hmr=False,
+        )
+        print("Neutralizing system with GROMACS genion...")
+        ionized_gro, ion_counts = neutralize_with_gromacs(
+            gro_file="pre_ions.gro",
+            top_file="pre_ions.top",
+            solvent_group=solvent_group or solvent_name.upper(),
+            gmx_executable=gmx_executable or "gmx",
+        )
+        waters_replaced_by_ions = sum(ion_counts.values())
+        solvent_count = solvent_count - waters_replaced_by_ions
+        final_hydration_level = (
+            solvent_count / total_lipid_count
+            if total_lipid_count > 0
+            else 0.0
+        )
+        config["parameters"]["solvent_count_after_genion"] = solvent_count
+        config["parameters"]["waters_replaced_by_ions"] = waters_replaced_by_ions
+        config["parameters"]["final_hydration_level"] = final_hydration_level
+        config["parameters"]["final_hydration_delta"] = (
+            solvent_count - target_solvent_count
+        )
+        config["parameters"]["ion_counts"] = ion_counts
+        save_config(Path(config_path), config)
+        print(f"GROMACS inserted ions: NA={ion_counts['NA']}, CL={ion_counts['CL']}.")
+        print(
+            "Hydration after ion replacement: "
+            f"{final_hydration_level:.3f} waters/lipid "
+            f"({solvent_count} waters; target {target_solvent_count}, "
+            f"Packmol placed {packmol_solvent_count})."
+        )
+        _build_interchange(
+            coordinate_file=ionized_gro,
+            output_prefix="bilayer",
+            box_dims=box_dims,
+            lipid_names=lipid_names,
+            lipid_counts=lipid_counts,
+            solvent_name=solvent_name,
+            solvent_count=solvent_count,
+            forcefield=forcefield,
+            lipid_molecules=lipid_molecules,
+            charge_model=charge_model,
+            hmr=hmr,
+            ion_counts=ion_counts,
+            preserve_coordinate_order=True,
+        )
+    else:
+        _build_interchange(
+            coordinate_file=packmol_output,
+            output_prefix="bilayer",
+            box_dims=box_dims,
+            lipid_names=lipid_names,
+            lipid_counts=lipid_counts,
+            solvent_name=solvent_name,
+            solvent_count=solvent_count,
+            forcefield=forcefield,
+            lipid_molecules=lipid_molecules,
+            charge_model=charge_model,
+            hmr=hmr,
+        )
 
     if hmr:
-        interchange.to_gromacs(prefix="bilayer", decimal=3, hydrogen_mass=3.0)
         print("System saved with HMR as bilayer.top / bilayer.gro.")
     else:
-        interchange.to_gromacs(prefix="bilayer")
         print("System saved without HMR as bilayer.top / bilayer.gro.")
 
     elapsed = time.time() - start_time
